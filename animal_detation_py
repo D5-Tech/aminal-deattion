@@ -9,12 +9,20 @@ from transformers import AutoFeatureExtractor, AutoModelForImageClassification
 yolo_model = YOLO('yolov8n.pt')  # Using the nano model for speed
 
 # Load a specialized model for precise classification
-classifier_name = "microsoft/resnet-50"  # This model is good at classifying various objects, including animals
+classifier_name = "microsoft/resnet-50"
 feature_extractor = AutoFeatureExtractor.from_pretrained(classifier_name)
 classifier_model = AutoModelForImageClassification.from_pretrained(classifier_name)
 
 # Initialize the webcam
 cap = cv2.VideoCapture(0)
+
+# Set the capture resolution to maximum
+cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
+cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
+
+# Get the actual frame size (may be different from requested size)
+frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
 # Set up image transformation for the classifier
 transform = transforms.Compose([
@@ -22,61 +30,79 @@ transform = transforms.Compose([
     transforms.ToTensor(),
 ])
 
-while True:
-    # Read a frame from the webcam
-    ret, frame = cap.read()
+# Dictionary to map specific animals to general categories
+animal_categories = {
+    'elephant': 'Elephant', 'african_elephant': 'Elephant', 'indian_elephant': 'Elephant',
+    'tiger': 'Big Cat', 'lion': 'Big Cat', 'leopard': 'Big Cat', 'cheetah': 'Big Cat',
+    'wolf': 'Canine', 'fox': 'Canine', 'dog': 'Canine',
+    'horse': 'Equine', 'zebra': 'Equine',
+    'cow': 'Bovine', 'bison': 'Bovine', 'buffalo': 'Bovine',
+    'bird': 'Bird', 'eagle': 'Bird', 'owl': 'Bird', 'penguin': 'Bird',
+    'bear': 'Bear', 'polar_bear': 'Bear', 'panda': 'Bear',
+    'monkey': 'Primate', 'gorilla': 'Primate', 'chimpanzee': 'Primate',
+    # Add more mappings as needed
+}
 
+current_category = ""
+
+def draw_bold_text(img, text, pos, font, font_scale, text_color, font_thickness):
+    # Draw text with a thick black border
+    border_color = (0, 0, 0)
+    border_thickness = font_thickness + 2
+    cv2.putText(img, text, pos, font, font_scale, border_color, border_thickness, cv2.LINE_AA)
+    # Draw the main text
+    cv2.putText(img, text, pos, font, font_scale, text_color, font_thickness, cv2.LINE_AA)
+
+# Create a named window and set it to full screen
+cv2.namedWindow('Precise Animal Detection', cv2.WND_PROP_FULLSCREEN)
+cv2.setWindowProperty('Precise Animal Detection', cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+
+while True:
+    ret, frame = cap.read()
     if not ret:
         break
 
-    # Perform object detection with YOLO
+    # Resize frame to fit the screen
+    frame = cv2.resize(frame, (frame_width, frame_height))
+
     results = yolo_model(frame)
 
-    # Process the results
     for result in results:
         boxes = result.boxes.cpu().numpy()
         for box in boxes:
-            # Get the class name from YOLO
             class_id = int(box.cls[0])
             class_name = yolo_model.names[class_id]
 
-            # Only process if it's an animal
             if class_name in ['bird', 'cat', 'dog', 'horse', 'sheep', 'cow', 'elephant', 'bear', 'zebra', 'giraffe']:
-                # Get the coordinates of the bounding box
                 x1, y1, x2, y2 = box.xyxy[0].astype(int)
-
-                # Crop the detected animal from the frame
                 animal_image = frame[y1:y2, x1:x2]
-
-                # Convert to PIL Image for the classifier
                 pil_image = Image.fromarray(cv2.cvtColor(animal_image, cv2.COLOR_BGR2RGB))
-
-                # Prepare the image for the classifier
                 inputs = feature_extractor(images=pil_image, return_tensors="pt")
 
-                # Perform classification
                 with torch.no_grad():
                     outputs = classifier_model(**inputs)
 
-                # Get the predicted class
                 predicted_class_idx = outputs.logits.argmax(-1).item()
                 predicted_class = classifier_model.config.id2label[predicted_class_idx]
                 confidence = torch.nn.functional.softmax(outputs.logits, dim=-1)[0, predicted_class_idx].item()
 
+                # Update the current category
+                current_category = animal_categories.get(predicted_class.lower(), predicted_class)
+
                 # Draw bounding box
-                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 3)
 
-                # Display class name and confidence
+                # Display species name and confidence in the box
                 label = f'{predicted_class}: {confidence:.2f}'
-                cv2.putText(frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
+                draw_bold_text(frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
 
-    # Display the frame
+    # Display the current animal category at the top of the screen
+    draw_bold_text(frame, f"Category: {current_category}", (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (255, 255, 255), 3)
+
     cv2.imshow('Precise Animal Detection', frame)
 
-    # Break the loop if 'q' is pressed
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break
 
-# Release the webcam and close all windows
 cap.release()
 cv2.destroyAllWindows()

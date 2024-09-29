@@ -1,46 +1,77 @@
 import cv2
-import numpy as np
+import torch
+import torchvision.transforms as transforms
 from ultralytics import YOLO
+from PIL import Image
+from transformers import AutoFeatureExtractor, AutoModelForImageClassification
 
-# Load the YOLO model
-model = YOLO('yolov8n.pt')
+# Load the YOLO model for fast detection
+yolo_model = YOLO('yolov8n.pt')  # Using the nano model for speed
+
+# Load a specialized model for precise classification
+classifier_name = "microsoft/resnet-50"  # This model is good at classifying various objects, including animals
+feature_extractor = AutoFeatureExtractor.from_pretrained(classifier_name)
+classifier_model = AutoModelForImageClassification.from_pretrained(classifier_name)
 
 # Initialize the webcam
 cap = cv2.VideoCapture(0)
 
+# Set up image transformation for the classifier
+transform = transforms.Compose([
+    transforms.Resize((224, 224)),
+    transforms.ToTensor(),
+])
+
 while True:
     # Read a frame from the webcam
     ret, frame = cap.read()
-    
+
     if not ret:
         break
 
-    # Perform object detection
-    results = model(frame)
+    # Perform object detection with YOLO
+    results = yolo_model(frame)
 
     # Process the results
     for result in results:
         boxes = result.boxes.cpu().numpy()
         for box in boxes:
-            # Get the coordinates of the bounding box
-            x1, y1, x2, y2 = box.xyxy[0].astype(int)
-            
-            # Get the class name and confidence
-            class_id = box.cls[0].astype(int)
-            conf = box.conf[0]
-            class_name = model.names[class_id]
-            
-            # Only display animals (filtering out other detected objects)
+            # Get the class name from YOLO
+            class_id = int(box.cls[0])
+            class_name = yolo_model.names[class_id]
+
+            # Only process if it's an animal
             if class_name in ['bird', 'cat', 'dog', 'horse', 'sheep', 'cow', 'elephant', 'bear', 'zebra', 'giraffe']:
+                # Get the coordinates of the bounding box
+                x1, y1, x2, y2 = box.xyxy[0].astype(int)
+
+                # Crop the detected animal from the frame
+                animal_image = frame[y1:y2, x1:x2]
+
+                # Convert to PIL Image for the classifier
+                pil_image = Image.fromarray(cv2.cvtColor(animal_image, cv2.COLOR_BGR2RGB))
+
+                # Prepare the image for the classifier
+                inputs = feature_extractor(images=pil_image, return_tensors="pt")
+
+                # Perform classification
+                with torch.no_grad():
+                    outputs = classifier_model(**inputs)
+
+                # Get the predicted class
+                predicted_class_idx = outputs.logits.argmax(-1).item()
+                predicted_class = classifier_model.config.id2label[predicted_class_idx]
+                confidence = torch.nn.functional.softmax(outputs.logits, dim=-1)[0, predicted_class_idx].item()
+
                 # Draw bounding box
                 cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                
+
                 # Display class name and confidence
-                label = f'{class_name} {conf:.2f}'
+                label = f'{predicted_class}: {confidence:.2f}'
                 cv2.putText(frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
 
     # Display the frame
-    cv2.imshow('Animal Detection', frame)
+    cv2.imshow('Precise Animal Detection', frame)
 
     # Break the loop if 'q' is pressed
     if cv2.waitKey(1) & 0xFF == ord('q'):

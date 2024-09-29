@@ -1,0 +1,53 @@
+import cv2
+import numpy as np
+import tensorflow as tf
+from tensorflow.keras.applications.mobilenet_v2 import MobileNetV2, preprocess_input, decode_predictions
+
+# Load the pre-trained MobileNetV2 model
+model = MobileNetV2(weights='imagenet')
+
+# Initialize the camera
+camera = cv2.VideoCapture(0)
+
+while True:
+    # Capture a frame from the camera
+    ret, frame = camera.read()
+
+    if not ret:
+        print("Failed to capture image")
+        break
+
+    # Resize the frame to 224x224 pixels (required by MobileNetV2)
+    img = cv2.resize(frame, (224, 224))
+
+    # Preprocess the image for MobileNetV2
+    img = preprocess_input(np.expand_dims(img, axis=0))
+
+    # Make predictions using the model
+    predictions = model.predict(img)
+
+    # Decode the predictions to get readable labels
+    decoded_predictions = decode_predictions(predictions, top=1)[0]  # Only get top prediction
+
+    # Check if the prediction is an animal (from ImageNet's animal classes)
+    imagenet_id, label, score = decoded_predictions[0]
+
+    # Display the detected animal if the confidence is high enough
+    if score > 0.5:  # You can adjust the threshold
+        text = f"Detected: {label} ({score * 100:.2f}%)"
+    else:
+        text = "Unable to confidently detect an animal"
+
+    # Display the result on the frame
+    cv2.putText(frame, text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+
+    # Show the frame with prediction
+    cv2.imshow("Animal Detection", frame)
+
+    # Exit the loop if 'q' is pressed
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
+
+# Release the camera and close windows
+camera.release()
+cv2.destroyAllWindows()

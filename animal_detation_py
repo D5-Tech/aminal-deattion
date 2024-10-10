@@ -35,21 +35,17 @@ transform = transforms.Compose([
 # Dictionary to map specific animals to general categories
 animal_categories = {
     'elephant': 'Elephant', 'african_elephant': 'Elephant', 'indian_elephant': 'Elephant',
-    'tiger': 'Big Cat', 'lion': 'Big Cat', 'leopard': 'Big Cat', 'cheetah': 'Big Cat',
-    'wolf': 'Canine', 'fox': 'Canine', 'dog': 'Canine',
-    'horse': 'Equine', 'zebra': 'Equine',
-    'cow': 'Bovine', 'bison': 'Bovine', 'buffalo': 'Bovine',
-    'bird': 'Bird', 'eagle': 'Bird', 'owl': 'Bird', 'penguin': 'Bird',
-    'bear': 'Bear', 'polar_bear': 'Bear', 'panda': 'Bear',
-    'monkey': 'Primate', 'gorilla': 'Primate', 'chimpanzee': 'Primate',
+    'loxodonta_africana': 'Elephant',  # Add this line for African elephant
+    'peacock': 'Peacock',
+    'pig': 'Pig', 'wild_boar': 'Pig', 'domestic_pig': 'Pig',
     # Add more mappings as needed
 }
 
 current_category = ""
 
 # Blynk API token and URLs
-blynk_url_on = "https://blynk.cloud/external/api/update?token=GquU8Ba9-tacHeP20if-NHixT3Pq43iz&v1=1"
-blynk_url_off = "https://blynk.cloud/external/api/update?token=GquU8Ba9-tacHeP20if-NHixT3Pq43iz&v1=0"
+blynk_url_on = "https://blynk.cloud/external/api/update?token=Iom3jPBDZK0SSrML2yuosPq3047m3u7V&v12=1"
+blynk_url_off = "https://blynk.cloud/external/api/update?token=Iom3jPBDZK0SSrML2yuosPq3047m3u7V&v12=0"
 
 def draw_bold_text(img, text, pos, font, font_scale, text_color, font_thickness):
     # Draw text with a thick black border
@@ -63,6 +59,9 @@ def draw_bold_text(img, text, pos, font, font_scale, text_color, font_thickness)
 cv2.namedWindow('Precise Animal Detection', cv2.WND_PROP_FULLSCREEN)
 cv2.setWindowProperty('Precise Animal Detection', cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
 
+# Set to keep track of recently detected animals
+recently_detected = set()
+
 while True:
     ret, frame = cap.read()
     if not ret:
@@ -73,7 +72,7 @@ while True:
 
     results = yolo_model(frame)
 
-    detected_peacock = False
+    detected_target_animal = False
 
     for result in results:
         boxes = result.boxes.cpu().numpy()
@@ -91,20 +90,32 @@ while True:
                     outputs = classifier_model(**inputs)
 
                 predicted_class_idx = outputs.logits.argmax(-1).item()
-                predicted_class = classifier_model.config.id2label[predicted_class_idx]
+                predicted_class = classifier_model.config.id2label[predicted_class_idx].lower()
                 confidence = torch.nn.functional.softmax(outputs.logits, dim=-1)[0, predicted_class_idx].item()
 
                 # Update the current category
-                current_category = animal_categories.get(predicted_class.lower(), predicted_class)
+                current_category = animal_categories.get(predicted_class, predicted_class)
 
-                # Check if the detected animal is a peacock
-                if predicted_class.lower() == 'peacock':
-                    detected_peacock = True
-                    # Send a request to set v1=1
-                    requests.get(blynk_url_on)
-                    time.sleep(3)
-                    # Set v1=0 after 3 seconds
-                    requests.get(blynk_url_off)
+                # Debug print
+                print(f"Detected: {predicted_class}, Categorized as: {current_category}")
+
+                # Check if the detected animal is one of the target animals (Elephant, Peacock, or Pig)
+                if current_category == 'Elephant' or 'elephant' in predicted_class:
+                    detected_target_animal = True
+                    if 'Elephant' not in recently_detected:
+                        print("Elephant detected, activating LED")
+                        requests.get(blynk_url_on)
+                        time.sleep(3)
+                        requests.get(blynk_url_off)
+                        recently_detected.add('Elephant')
+                elif current_category in ['Peacock', 'Pig']:
+                    detected_target_animal = True
+                    if current_category not in recently_detected:
+                        print(f"{current_category} detected, activating LED")
+                        requests.get(blynk_url_on)
+                        time.sleep(3)
+                        requests.get(blynk_url_off)
+                        recently_detected.add(current_category)
 
                 # Draw bounding box
                 cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 3)
@@ -112,6 +123,10 @@ while True:
                 # Display species name and confidence in the box
                 label = f'{predicted_class}: {confidence:.2f}'
                 draw_bold_text(frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+
+    # Clear the recently_detected set if no target animal is detected
+    if not detected_target_animal:
+        recently_detected.clear()
 
     # Display the current animal category at the top of the screen
     draw_bold_text(frame, f"Category: {current_category}", (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (255, 255, 255), 3)

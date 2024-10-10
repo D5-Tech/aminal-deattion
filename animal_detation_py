@@ -6,6 +6,7 @@ from PIL import Image
 from transformers import AutoFeatureExtractor, AutoModelForImageClassification
 import time
 import requests
+import telebot
 
 # Load the YOLO model for fast detection
 yolo_model = YOLO('yolov8n.pt')  # Using the nano model for speed
@@ -47,6 +48,17 @@ current_category = ""
 # Blynk API token and URLs
 blynk_url_on = "https://blynk.cloud/external/api/update?token=Iom3jPBDZK0SSrML2yuosPq3047m3u7V&v12=1"
 blynk_url_off = "https://blynk.cloud/external/api/update?token=Iom3jPBDZK0SSrML2yuosPq3047m3u7V&v12=0"
+
+# Telegram bot settings
+TELEGRAM_BOT_TOKEN = "7582513619:AAGihjyH2o-49yzPFlEy4leXdHyJvSfAEag"
+TELEGRAM_CHAT_ID = "6589311807"
+bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
+
+def send_telegram_message(message):
+    try:
+        bot.send_message(TELEGRAM_CHAT_ID, message)
+    except Exception as e:
+        print(f"Error sending Telegram message: {e}")
 
 def draw_bold_text(img, text, pos, font, font_scale, text_color, font_thickness):
     # Draw text with a thick black border
@@ -106,8 +118,9 @@ while True:
                    any(animal in predicted_class for animal in ['elephant', 'peacock', 'pig', 'boar', 'fox_terrier']):
                     detected_target_animal = True
                     if current_category not in recently_detected:
-                        print(f"{current_category} detected, activating LED")
+                        print(f"{current_category} detected, activating LED and sending Telegram message")
                         requests.get(blynk_url_on)
+                        send_telegram_message(f"Detected: {current_category}")
                         time.sleep(3)
                         requests.get(blynk_url_off)
                         recently_detected.add(current_category)

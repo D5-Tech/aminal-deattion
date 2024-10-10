@@ -38,7 +38,7 @@ animal_categories = {
     'peacock': 'Peacock',
     'pig': 'Pig', 'wild_boar': 'Pig', 'domestic_pig': 'Pig', 'sus_scrofa': 'Pig',
     'wire-haired_fox_terrier': 'Wire-haired Fox Terrier', 'fox_terrier': 'Wire-haired Fox Terrier',
-    'macaque': 'Macaque', 'monkey': 'Macaque', 'primate': 'Macaque',
+    'macaque': 'Macaque',
     # Add more mappings as needed
 }
 
@@ -101,8 +101,9 @@ while True:
                 print(f"Detected: {predicted_class}, Categorized as: {current_category}")
 
                 # Check if the detected animal is one of the target animals
-                if current_category in ['Elephant', 'Peacock', 'Pig', 'Wire-haired Fox Terrier', 'Macaque'] or \
-                   any(animal in predicted_class for animal in ['elephant', 'peacock', 'pig', 'boar', 'fox_terrier', 'macaque', 'monkey']):
+                if current_category in ['Elephant', 'Peacock', 'Pig', 'Wire-haired Fox Terrier'] or \
+                   (current_category == 'Macaque' and predicted_class == 'macaque') or \
+                   any(animal in predicted_class for animal in ['elephant', 'peacock', 'pig', 'boar', 'fox_terrier']):
                     detected_target_animal = True
                     if current_category not in recently_detected:
                         print(f"{current_category} detected, activating LED")

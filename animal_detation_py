@@ -4,6 +4,9 @@ import torchvision.transforms as transforms
 from ultralytics import YOLO
 from PIL import Image
 from transformers import AutoFeatureExtractor, AutoModelForImageClassification
+import time
+import requests
+import telebot
 
 # Load the YOLO model for fast detection
 yolo_model = YOLO('yolov8n.pt')  # Using the nano model for speed
@@ -32,18 +35,30 @@ transform = transforms.Compose([
 
 # Dictionary to map specific animals to general categories
 animal_categories = {
-    'elephant': 'Elephant', 'african_elephant': 'Elephant', 'indian_elephant': 'Elephant',
-    'tiger': 'Big Cat', 'lion': 'Big Cat', 'leopard': 'Big Cat', 'cheetah': 'Big Cat',
-    'wolf': 'Canine', 'fox': 'Canine', 'dog': 'Canine',
-    'horse': 'Equine', 'zebra': 'Equine',
-    'cow': 'Bovine', 'bison': 'Bovine', 'buffalo': 'Bovine',
-    'bird': 'Bird', 'eagle': 'Bird', 'owl': 'Bird', 'penguin': 'Bird',
-    'bear': 'Bear', 'polar_bear': 'Bear', 'panda': 'Bear',
-    'monkey': 'Primate', 'gorilla': 'Primate', 'chimpanzee': 'Primate',
+    'elephant': 'Elephant', 'african_elephant': 'Elephant', 'indian_elephant': 'Elephant', 'loxodonta_africana': 'Elephant',
+    'peacock': 'Peacock',
+    'pig': 'Pig', 'wild_boar': 'Pig', 'domestic_pig': 'Pig', 'sus_scrofa': 'Pig',
+    'wire-haired_fox_terrier': 'Wire-haired Fox Terrier', 'fox_terrier': 'Wire-haired Fox Terrier',
+    'macaque': 'Macaque',
     # Add more mappings as needed
 }
 
 current_category = ""
+
+# Blynk API token and URLs
+blynk_url_on = "https://blynk.cloud/external/api/update?tok=Iom3jPBDZK0SSrML2osPq3047m3u&v12=1"
+blynk_url_off = "https://blynk.cloudxternal/api/update?token=Iom3jPBDZK0SSrML2yuq3047m3u&v12=0"
+
+# Telegram bot settings
+TELEGRAM_BOT_TOKEN = "7582513619:AAGihyzPFlEy4leXdHyJvSfAEag"
+TELEGRAM_CHAT_ID = "6581807"
+bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
+
+def send_telegram_message(message):
+    try:
+        bot.send_message(TELEGRAM_CHAT_ID, message)
+    except Exception as e:
+        print(f"Error sending Telegram message: {e}")
 
 def draw_bold_text(img, text, pos, font, font_scale, text_color, font_thickness):
     # Draw text with a thick black border
@@ -57,6 +72,9 @@ def draw_bold_text(img, text, pos, font, font_scale, text_color, font_thickness)
 cv2.namedWindow('Precise Animal Detection', cv2.WND_PROP_FULLSCREEN)
 cv2.setWindowProperty('Precise Animal Detection', cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
 
+# Set to keep track of recently detected animals
+recently_detected = set()
+
 while True:
     ret, frame = cap.read()
     if not ret:
@@ -67,13 +85,15 @@ while True:
 
     results = yolo_model(frame)
 
+    detected_target_animal = False
+
     for result in results:
         boxes = result.boxes.cpu().numpy()
         for box in boxes:
             class_id = int(box.cls[0])
             class_name = yolo_model.names[class_id]
 
-            if class_name in ['bird', 'cat', 'dog', 'horse', 'sheep', 'cow', 'elephant', 'bear', 'zebra', 'giraffe']:
+            if class_name in ['bird', 'cat', 'dog', 'horse', 'sheep', 'cow', 'elephant', 'bear', 'zebra', 'giraffe', 'monkey']:
                 x1, y1, x2, y2 = box.xyxy[0].astype(int)
                 animal_image = frame[y1:y2, x1:x2]
                 pil_image = Image.fromarray(cv2.cvtColor(animal_image, cv2.COLOR_BGR2RGB))
@@ -83,11 +103,27 @@ while True:
                     outputs = classifier_model(**inputs)
 
                 predicted_class_idx = outputs.logits.argmax(-1).item()
-                predicted_class = classifier_model.config.id2label[predicted_class_idx]
+                predicted_class = classifier_model.config.id2label[predicted_class_idx].lower()
                 confidence = torch.nn.functional.softmax(outputs.logits, dim=-1)[0, predicted_class_idx].item()
 
                 # Update the current category
-                current_category = animal_categories.get(predicted_class.lower(), predicted_class)
+                current_category = animal_categories.get(predicted_class, predicted_class)
+
+                # Debug print
+                print(f"Detected: {predicted_class}, Categorized as: {current_category}")
+
+                # Check if the detected animal is one of the target animals
+                if current_category in ['Elephant', 'Peacock', 'Pig', 'Wire-haired Fox Terrier'] or \
+                   (current_category == 'Macaque' and predicted_class == 'macaque') or \
+                   any(animal in predicted_class for animal in ['elephant', 'peacock', 'pig', 'boar', 'fox_terrier']):
+                    detected_target_animal = True
+                    if current_category not in recently_detected:
+                        print(f"{current_category} detected, activating LED and sending Telegram message")
+                        requests.get(blynk_url_on)
+                        send_telegram_message(f"Detected: {current_category}")
+                        time.sleep(3)
+                        requests.get(blynk_url_off)
+                        recently_detected.add(current_category)
 
                 # Draw bounding box
                 cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 3)
@@ -95,6 +131,10 @@ while True:
                 # Display species name and confidence in the box
                 label = f'{predicted_class}: {confidence:.2f}'
                 draw_bold_text(frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+
+    # Clear the recently_detected set if no target animal is detected
+    if not detected_target_animal:
+        recently_detected.clear()
 
     # Display the current animal category at the top of the screen
     draw_bold_text(frame, f"Category: {current_category}", (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (255, 255, 255), 3)
@@ -104,6 +144,5 @@ while True:
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break
 
-cap.release()
 cap.release()
 cv2.destroyAllWindows()

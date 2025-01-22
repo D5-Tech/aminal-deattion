@@ -1,3 +1,15 @@
+'''
+pip install opencv-python
+pip install torch
+pip install torchvision
+pip install ultralytics
+pip install Pillow
+pip install transformers
+pip install telebot
+pip install requests
+
+
+'''
 
 import cv2
 import torch
